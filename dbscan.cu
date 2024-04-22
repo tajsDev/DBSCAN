@@ -236,94 +236,90 @@ cudaDeviceSynchronize();
 return;
 }
 
-
-void checkParams(unsigned int N, unsigned int DIM)
+/*
+sortedD: Dataset with a sorted x axis
+eps: search radius distance
+MinPts: minimum number of points in eps to define as part of cluster
+DIM: number of dimensions per point
+*/
+getNeighborsBaseline(sortedD, eps, DIM, int min_pts, int sortedDim, int *labels) //called with thread per element of dataset (N threads)
 {
-  if(N<=0 || DIM<=0){
-    fprintf(stderr, "\n Invalid parameters: Error, N: %u, DIM: %u", N, DIM);
-    fprintf(stderr, "\nReturning");
-    exit(0); 
-  }
-}
+	//assign thread ID 0,1,2,3....N
+	tid = threadIdx.x + blockIdx.x * blockDim.x;
+	
+	//only keep N threads 
+	if (tid >= N)
+	{
+		return;
+	}
+	
+	unsigned int neighborIndex=0;
+	float oneDimDistance = 0;
+	float fullDistance;
+	int label = NOISE
+	
+	/////////////////////// COUNTING NEIGHBORS  /////////////////////////////
+	
+	//loop up from threadID element + 1 until difference in sorted dimension values > epsilon
+	for (int pointIndex=tid+1; oneDimDistance < eps && pointIndex < N; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
+	{
+		float currSumOfDiff = 0;
+		
+		//this line breaks the loop
+		//basically if the difference in the sortedDim of 2 points > eps, no more comparisons needed
+		oneDimDistance = sortedD[ tid*DIM+sortedDim ] - sortedD[ pointIndex*DIM+sortedDim ];
+		
+		//loop through dimensions of points 
+		for (int dimIndex = 0; dimIndex < DIM; dimIndex++)
+		{
+			currSumOfDiff += (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]) * 
+							  (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]);
+		}
+		fullDistance = sqrt(currSumOfDiff);
+		
+		if (fullDistance <= eps)
+		{
+			neighborArr[tid+neighborIndex] = pointIndex;
+			
+			neighborIndex++;
+		}
+	}
+			
+	//loop down from threadID element - 1 until difference in x values > epsilon
+	for (int pointIndex=tid-1; oneDimDistance < eps; pointIndex--)
+	{
+		//this line breaks the loop
+		//basically if the difference in the sortedDim of 2 points > eps, no more comparisons needed
+		oneDimDistance = sortedD[ tid*DIM+sortedDim ] - sortedD[ pointIndex*DIM+sortedDim ];
+		
+		//loop through dimensions of points 
+		for (int dimIndex = 0; dimIndex < DIM; dimIndex++)
+		{
+			currSumOfDiff += (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]) * 
+							  (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]);
+		}
+		fullDistance = sqrt(currSumOfDiff);
+		
+		if (fullDistance <= eps)
+		{
+			neighborArr[tid+neighborIndex] = pointIndex;
+			
+			neighborIndex++;
+		}
+	}
 
+	//////////////////////// END COUNTING NEIGHBORS ///////////////////////
+	
+	// check if size of neighbors array < MinPts 
+	if (neighborsIndex >= min_pts) label = CORE_POINT;
+	
+	labels[tid] = label;
+	__syncthreads();
 
-void computeDistanceMatrixCPU(float * dataset, unsigned int N, unsigned int DIM)
-{
-  float * distanceMatrix = (float*)malloc(sizeof(float)*N*N);
-  double tstart = omp_get_wtime();
-
-  //Write code here
-
-  double tend = omp_get_wtime();
-
-  computeSumOfDistances(distanceMatrix, N);
-
-  printf("\nTime to compute distance matrix on the CPU: %f", tend - tstart);
-
-  free(distanceMatrix);
-}
-
-//For testing/debugging
-void computeSumOfDistances(float * distanceMatrix, unsigned int N)
-{
-  double computeSumOfDistances=0;
-  for (unsigned int i=0; i<N; i++)
-  {
-    for (unsigned int j=0; j<N; j++)
-    {
-      computeSumOfDistances+=(double)distanceMatrix[i*N+j];
-    }
-  }  
-
-  printf("\nSum of distances: %f", computeSumOfDistances);
-}
-//This is used to do post-processing in Python of bee statistics
-//I left it in the starter file in case anyone else wants to tinker with the 
-//distance matrix and the bees, but it is unnecessary for the assignment
-void outputDistanceMatrixToFile(float * distanceMatrix, unsigned int N)
-{
-
-// Open file for writing
-FILE * fp = fopen( "distance_matrix_output.txt", "w" ); 
-
- for (int i=0; i<N; i++){
-    for (int j=0; j<N; j++){
-      if(j!=(N-1)){
-        fprintf(fp, "%.3f,", distanceMatrix[i*N+j]);
-      }
-      else{
-        fprintf(fp, "%.3f\n", distanceMatrix[i*N+j]);
-      }
-    }
-    
-  }   
-
-  fclose(fp);
-}
-
-
-
-
-//Query distance matrix with one thread per feature vector
-__global__ void queryDistanceMatrixBaseline(float * distanceMatrix, const unsigned int N, const unsigned int DIM, const float epsilon, unsigned int * resultSet)
-{
-  //write code here
-  unsigned int tid = threadIdx.x + blockDim.x * blockIdx.x ;
-
-  if(tid < N ) {
-
-  }
-}
-
-
-//One thread per feature vector -- baseline kernel
-__global__ void distanceMatrixBaseline(float * dataset, float * distanceMatrix, const unsigned int N, const unsigned int DIM)
-{
-  //write code here
-  unsigned int tid = threadIdx.x + blockDim.x * blockIdx.x ;
-  if(tid < N ) {
-
-
-  }
+	if (label == CORE_POINT) {
+		// Expand cluster
+		expand_cluster(data, labels, tid, eps, min_pts, num_points);
+	}
+	 
 }
 
