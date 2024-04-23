@@ -237,12 +237,37 @@ return;
 }
 
 /*
-sortedD: Dataset with a sorted x axis
+sortedD: Dataset sorted along a certain axis
+sortedDim: single int that represents which axis is sorted
+   - This should be the axis with the biggest range in values
 eps: search radius distance
 MinPts: minimum number of points in eps to define as part of cluster
 DIM: number of dimensions per point
+
+neighborFreqs: a global array which shows how many neighbors each point has 
+(size N) 
+EX - [2,1,3,4,4...] 
+      point 1 has 2 neighbors
+	  point 2 has 1 neighbors 
+	  point 3 has 3 neighbors ....
+	  
+neighborsArr: a global array that lists all neighbors, must be used in accordance with neighborFreq
+(size N*N*F) where F is ~0.05 which is a percent of how many neighbors a point should have 
+EX - [34,26,200,439,23,34590,3459,239,49]
+when looking at neighborFreq we can say
+	  point 1 has neighbors 34 & 26
+	  point 2 has neighbor 200
+	  point 3 has neighbors 439, 23, & 34590 ....
+	  
+neighborPos: a global array which shows the start position of neighborsArr for each point
+             This array is populated in getNeighbors, but utilized in expand
+(size N)
+EX - [0,2,3,6,10]
+	  point 1 starts at index 0 of neighborsArr
+	  point 2 starts at Index 2 of neighborsArr
+	  point 3 starts at index 3 of neighborsArr ....
 */
-getNeighborsBaseline(sortedD, eps, DIM, int min_pts, int sortedDim, int *labels) //called with thread per element of dataset (N threads)
+getNeighbors(sortedD, eps, DIM, int min_pts, int sortedDim, int *neighborFreqs, int *neighborsArr, int *neighborPos) //called with thread per element of dataset (N threads)
 {
 	//assign thread ID 0,1,2,3....N
 	tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -253,12 +278,13 @@ getNeighborsBaseline(sortedD, eps, DIM, int min_pts, int sortedDim, int *labels)
 		return;
 	}
 	
-	unsigned int neighborIndex=0;
+	unsigned int numNeighbors=0;
 	float oneDimDistance = 0;
 	float fullDistance;
-	int label = NOISE
+	unsigned int localNeighbors[N*F];
+	unsigned int startIndex = 0;
 	
-	/////////////////////// COUNTING NEIGHBORS  /////////////////////////////
+	/////////////////////// OBTAINING LOCAL NEIGHBORS  /////////////////////////////
 	
 	//loop up from threadID element + 1 until difference in sorted dimension values > epsilon
 	for (int pointIndex=tid+1; oneDimDistance < eps && pointIndex < N; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
@@ -279,9 +305,9 @@ getNeighborsBaseline(sortedD, eps, DIM, int min_pts, int sortedDim, int *labels)
 		
 		if (fullDistance <= eps)
 		{
-			neighborArr[tid+neighborIndex] = pointIndex;
-			
-			neighborIndex++;
+			//neighborArr[tid+neighborIndex] = pointIndex;
+			localNeighbors[numNeighbors] = pointIndex;
+			numNeighbors++;
 		}
 	}
 			
@@ -302,24 +328,33 @@ getNeighborsBaseline(sortedD, eps, DIM, int min_pts, int sortedDim, int *labels)
 		
 		if (fullDistance <= eps)
 		{
-			neighborArr[tid+neighborIndex] = pointIndex;
-			
-			neighborIndex++;
+			//neighborArr[tid+neighborIndex] = pointIndex;
+			localNeighbors[numNeighbors] = pointIndex;
+			numNeighbors++;
 		}
 	}
 
-	//////////////////////// END COUNTING NEIGHBORS ///////////////////////
+	////////////////// POPULATE NEIGHBOR FREQUENCY ARRAY ///////////////////////
 	
-	// check if size of neighbors array < MinPts 
-	if (neighborsIndex >= min_pts) label = CORE_POINT;
+	//give neighborFreq number of neighbors 
+    neighborFreq[tid] = numNeighbors;
 	
-	labels[tid] = label;
 	__syncthreads();
-
-	if (label == CORE_POINT) {
-		// Expand cluster
-		expand_cluster(data, labels, tid, eps, min_pts, num_points);
+	
+	//////////////////////// POPULATE NEIGHBORS ARRAY  ////////////////////////
+	
+	//find starting position
+	for (int i = 0; i < tid; i++)
+	{
+		startIndex += neighborFreq[i];             //confirm this works
 	}
-	 
+	
+	neighborPos[ tid ] = startIndex;
+	
+	//transfer from registers to global 
+	for (int i = startIndex, int j=0; i < startIndex + numNeighbors; i++, j++)
+	{
+	    neighborsArr[ i ] = localNeighbors[j];
+	}
+	
 }
-
