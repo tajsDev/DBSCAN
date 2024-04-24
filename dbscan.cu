@@ -33,7 +33,8 @@ void warmUpGPU();
 void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts);
 void importDataset(char * fname, unsigned int N, unsigned int DIM, float * dataset);
 void sortDataset(float *dataset);     //for MODE 2 optimization 
-void outputDistanceMatrixToFile(float * distanceMatrix, unsigned int N);
+void outputResultToFile(int * resultSet, unsigned int N, double runTime)
+
 //Part 1: Getting distance matrix/neighbors array
 //Baseline kernel --- 
 
@@ -124,11 +125,7 @@ int main(int argc, char *argv[])
   if(MODE==1){
   unsigned int BLOCKDIM = BLOCKSIZE; 
   unsigned int NBLOCKS = ceil(N*1.0/BLOCKDIM);
-  //Part 1: create distance matrix 
-  getDistanceMatrix<<<NBLOCKS, BLOCKDIM>>>(dev_dataset, dev_distanceMatrix, N, DIM);
 
-  //Part 2: 
-  expandToNeighbors<<<>>>()
   }
 
   if(MODE==2){
@@ -136,7 +133,7 @@ int main(int argc, char *argv[])
   unsigned int NBLOCKS = ceil(N*1.0/BLOCKDIM);
 
   //Part 1: get neighbors array
-  getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>(dev_dataset, dev_distanceMatrix, N, DIM);
+  getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, eps, DIM, minPts, sortedDim, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
 
   //copy neighbors arrays to CPU for expand function
   gpuErrchk(cudaMemcpy(neighborsArr, dev_neighborsArr, sizeof(unsigned int)*N*N*F, cudaMemcpyDeviceToHost));
@@ -144,21 +141,31 @@ int main(int argc, char *argv[])
   gpuErrchk(cudaMemcpy(neighborPos, dev_neighborPos, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
 
   //Part 2: assign clusters
-  expandToNeighbors()
+  //create a clusterID array
+  int *clusterLabels = (int *)malloc(sizeof(int *)*N);
+  expandClusters( neighborFreqs, neighborsArr, neighborPos, N, minPts, clusterLabels);
   }
-
-  //print result set *****************
-
-  double tend=omp_get_wtime();
-  printf("\n[MODE: %d, N: %d] Total time: %f", MODE, N, tend-tstart);
   
-  //For outputing the distance matrix for post processing (not needed for assignment --- feel free to remove)
-  // float * distanceMatrix = (float*)calloc(N*N, sizeof(float));
-  // gpuErrchk(cudaMemcpy(distanceMatrix, dev_distanceMatrix, sizeof(float)*N*N, cudaMemcpyDeviceToHost));
-  // outputDistanceMatrixToFile(distanceMatrix, N);
+  double tend=omp_get_wtime(); 
+  double runTime = tend - tstart;
+  
+  printf("Writing result to file...\n");
+  outputResultToFile( clusterLabels, N, runTime);
+
  
   //Free memory here
-  printf("\n\n");
+  free(neighborsArr);
+  free(neighborFreqs);
+  free(neighborPos);
+  free(clusterLabels);
+  free(dataset);
+  
+  if (MODE != 1)
+  {
+      free(sortedD);
+  }
+  
+  printf("\n\nMain complete");
   return 0;
 }
 
@@ -214,6 +221,21 @@ void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
     fprintf(stderr, "\nReturning");
     exit(0); 
   }
+}
+
+void outputResultToFile(int * resultSet, unsigned int N, double runTime){
+    // Open file for writing
+    FILE * fp = fopen( "result_set.txt", "w" ); 
+	
+	fprintf(fp, "\n[MODE: %d, N: %d] Total time: %f", MODE, N, runTime);
+    fprintf(fp, "pointID -> clusterID\n\n"
+
+    for (int i=0; i<N; i++)
+	{
+        fprintf(fp, "%d -> %d\n", i, resultSet[i]);
+    }   
+
+    fclose(fp);
 }
 
 void warmUpGPU(){
@@ -353,7 +375,7 @@ void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int
         if (neighborFreqs[i] >= minPts) {
             // Point forms a cluster
             int startPos = neighborPos[i];
-            int endPos = startPos + neighborFreqs[i];
+            int endPos = neighborPos[i+1];
 
             // Merge the sets containing the point and its neighbors
             for (int j = startPos; j < endPos; j++) {
