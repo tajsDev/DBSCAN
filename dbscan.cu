@@ -7,8 +7,13 @@
 #include <iostream>
 #include <complex.h>
 #include <math.h>
+
+//factor (the max percent of dataset that can be neighbors) 
+//      No point be neighbors with more than 5% of the dataset
+#define F 0.05  
 //Error checking GPU calls
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
    if (code != cudaSuccess)
@@ -33,7 +38,6 @@ void outputDistanceMatrixToFile(float * distanceMatrix, unsigned int N);
 //Baseline kernel --- 
 
 //Sorted Data with neighborsArr
-
 getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDim, int *neighborFreqs, int *neighborsArr, int *neighborPos)
 
 //Part 2: expanding cluster ID to neighbors
@@ -61,18 +65,12 @@ int main(int argc, char *argv[])
   sscanf(argv[4],"%d",&minPts);
   strcpy(inputFname,argv[4]);
 
-  checkParams(N, DIM);
   checkParams(N, DIM, minPts);
 
   printf("\nAllocating the following amount of memory for the dataset: %f GiB", (sizeof(float)*N*DIM)/(1024*1024*1024.0));
-  printf("\nAllocating the following amount of memory for the distance matrix: %f GiB", (sizeof(float)*N*N)/(1024*1024*1024.0));
   
   float * dataset=(float*)malloc(sizeof(float*)*N*DIM);
   importDataset(inputFname, N, DIM, dataset);
-  //sort Dataset for optimized modes
-  if(MODE>1){
-
-  }
 
   double tstart=omp_get_wtime();
 
@@ -87,10 +85,29 @@ int main(int argc, char *argv[])
       float *dev_distanceMatrix;
       gpuErrchk(cudaMalloc((float**)&dev_distanceMatrix, sizeof(float)*N*N));
   }
-  else
+  else //if (MODE==2)
   {
+      //create, populate, allocate, and copy sortedData
       float *sortedD=(float*)malloc(sizeof(float*)*N*DIM);
       sortedD = sortDataset(dataset);
+      float *dev_sortedD;
+      gpuErrchk(cudaMalloc((float**)&dev_sortedD, sizeof(float)*N*DIM));
+      gpuErrchk(cudaMemcpy(dev_sortedD, sortedD, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
+
+      //create & allocate neighbors array
+      float *neighborsArr=(float*)malloc(sizeof(float*)*N*N*F);
+      float *dev_neighborsArr;
+      gpuErrchk(cudaMalloc((float**)&dev_neighborsArr, sizeof(float)*N*N*F));
+
+      //create & allocate neighbor frequency array
+      float *neighborFreqs=(float*)malloc(sizeof(float*)*N);
+      float *dev_neighborFreqs;
+      gpuErrchk(cudaMalloc((float**)&dev_neighborFreqs, sizeof(float)*N));
+
+     //create & allocate neighbor position array
+      float *neighborPos=(float*)malloc(sizeof(float*)*N);
+      float *dev_neighborPos;
+      gpuErrchk(cudaMalloc((float**)&dev_neighborPos, sizeof(float)*N));
   }
 
 
@@ -109,25 +126,30 @@ int main(int argc, char *argv[])
   unsigned int NBLOCKS = ceil(N*1.0/BLOCKDIM);
   //Part 1: create distance matrix 
   getDistanceMatrix<<<NBLOCKS, BLOCKDIM>>>(dev_dataset, dev_distanceMatrix, N, DIM);
-  //Part 2: Query distance matrix
+
+  //Part 2: 
   expandToNeighbors<<<>>>()
   }
+
   if(MODE==2){
   unsigned int BLOCKDIM = BLOCKSIZE; 
   unsigned int NBLOCKS = ceil(N*1.0/BLOCKDIM);
+
   //Part 1: get neighbors array
   getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>(dev_dataset, dev_distanceMatrix, N, DIM);
-  //Part 2: Query distance matrix
-  expandToNeighbors<<<>>>()
+
+  //copy neighbors arrays to CPU for expand function
+  gpuErrchk(cudaMemcpy(neighborsArr, dev_neighborsArr, sizeof(unsigned int)*N*N*F, cudaMemcpyDeviceToHost));
+  gpuErrchk(cudaMemcpy(neighborFreqs, dev_neighborFreqs, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
+  gpuErrchk(cudaMemcpy(neighborPos, dev_neighborPos, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
+
+  //Part 2: assign clusters
+  expandToNeighbors()
   }
   
   //Copy result set from the GPU
   gpuErrchk(cudaMemcpy(resultSet, dev_resultSet, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
-  //Compute the sum of the result set array
-  unsigned int totalWithinEpsilon=0;
-  //Write code here
-  
-  printf("\nTotal number of points within epsilon: %u", totalWithinEpsilon);
+
   double tend=omp_get_wtime();
   printf("\n[MODE: %d, N: %d] Total time: %f", MODE, N, tend-tstart);
   
@@ -319,7 +341,6 @@ getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDi
 	{
 	    neighborsArr[ i ] = localNeighbors[j];
 	}
-	
 }
 
 // CPU function for expand clusters using disjoint set
