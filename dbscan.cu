@@ -74,14 +74,14 @@ int main(int argc, char *argv[])
 
   double tstart=omp_get_wtime();
 
-  //Allocate memory for the dataset
-  float * dev_dataset;
-  gpuErrchk(cudaMalloc((float**)&dev_dataset, sizeof(float)*N*DIM));
-  gpuErrchk(cudaMemcpy(dev_dataset, dataset, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
-
   //For baseline that computes the distance matrix
   if (MODE==1)
   {
+      //Allocate memory for the dataset
+      float * dev_dataset;
+      gpuErrchk(cudaMalloc((float**)&dev_dataset, sizeof(float)*N*DIM));
+      gpuErrchk(cudaMemcpy(dev_dataset, dataset, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
+
       float *dev_distanceMatrix;
       gpuErrchk(cudaMalloc((float**)&dev_distanceMatrix, sizeof(float)*N*N));
   }
@@ -146,9 +146,8 @@ int main(int argc, char *argv[])
   //Part 2: assign clusters
   expandToNeighbors()
   }
-  
-  //Copy result set from the GPU
-  gpuErrchk(cudaMemcpy(resultSet, dev_resultSet, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
+
+  //print result set *****************
 
   double tend=omp_get_wtime();
   printf("\n[MODE: %d, N: %d] Total time: %f", MODE, N, tend-tstart);
