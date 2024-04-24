@@ -382,3 +382,123 @@ void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int
         clusterLabels[i] = ds.findSet(i);
     }
 }
+
+int runPartition(float *dataset, int lowIndex, int highIndex )
+{
+	//declare variables:
+	int workIndex, pivIndex, partValue;
+	// Identify the partition value at the beginning
+    // of the array segment (at lowIndex)
+	partValue = dataset[lowIndex];
+	
+    // set the working index and the pivot index
+    // to the low index parameter
+	pivIndex = lowIndex;
+	
+    // Start a loop across the the array segment
+    // from the low index to the high index, inclusive
+    // This will use the working index
+	for(workIndex = lowIndex+1; workIndex < highIndex; workIndex++)
+	{
+        // check if the value at the current working index
+        // is less than the original pivot value
+		if(dataset[workIndex] < partValue)
+		{
+            // increment the pivot index
+			pivIndex++;
+            // swap the value at the working index
+            // with the value at the pivot index
+			swapElements(dataset, workIndex, pivIndex);
+		}
+	}
+    // end working loop 
+
+    // Swap the original pivot value (at the low index)
+    // with the value at the current pivot index
+	//function swapElements
+	swapElements(dataset,pivIndex,lowIndex);
+	
+    // return the pivot index
+	return pivIndex;
+	
+}
+
+void runQuickSort( float * dataset, int size)
+{
+	//get low index
+	int lowIndex = 0 ;
+	//get high index
+	int highIndex = size ;
+	
+	//call runQuickSortHelper
+	runQuickSortHelper(dataset, lowIndex, highIndex);
+}
+
+void runQuickSortHelper( float * dataset,  int lowIndex, int highIndex )
+{
+	//declare pivot index
+	int pivIndex;
+	
+	//first make sure loindex of list is less than upper
+	if(lowIndex < highIndex)
+	{
+		//call partiiton processto set pibot val and get its index
+		pivIndex = runPartition(dataset, lowIndex, highIndex);
+		
+		//call quick sort process for left side of list
+		//to the left of hte pivot indedx
+		runQuickSortHelper(dataset,lowIndex,pivIndex);
+		
+		//call quick sort process for right side of list
+		//to the right of the pivot index
+		runQuickSortHelper(dataset,pivIndex+1,highIndex);
+	}
+		
+	
+}
+
+void CPUdbscan(float * clusters) {
+  int i, j, cluster = 0;
+  for (i = 0; i < DATASET_SIZE; i++) {
+    if (clusters[i] != 0) continue;
+    float neighbors[SIZE];
+    int neighbors_size = findNeighbors(i, neighbors);
+
+    if (neighbors_size < minPoints) {
+      clusters[i] = -1;
+      continue;
+    }
+    cluster++;
+    clusters[i] = cluster;
+
+    for (j = 0; j < neighbors_size; j++) {
+      int dataIndex = neighbors[j];
+
+      if (dataIndex == i) continue;
+
+      if (clusters[dataIndex] == -1) {
+        clusters[dataIndex] = cluster;
+        continue;
+      }
+      if (clusters[dataIndex] != 0) continue;
+
+      clusters[dataIndex] = cluster;
+
+      float moreNeighbors[SIZE];
+      int moreNeighbors_size = findNeighbors(dataIndex, moreNeighbors);
+
+      if (moreNeighbors_size >= minPoints) {
+        int x;
+        for (x = 0; x < moreNeighbors_size; x++) {
+          neighbors[neighbors_size++] = moreNeighbors[x];
+        }
+      }
+    }
+  }
+}
+
+int findNeighbors(int index,float * neighbors) {
+int size = 0;
+
+  return size;
+}
