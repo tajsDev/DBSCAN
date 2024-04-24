@@ -41,12 +41,13 @@ void outputDistanceMatrixToFile(float * distanceMatrix, unsigned int N);
 //Baseline kernel --- 
 
 //Sorted Data with neighborsArr
-
+getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDim, int *neighborFreqs, int *neighborsArr, int *neighborPos)
 
 //Part 2: expanding cluster ID to neighbors
 //Baseline kernel --- 
 
 //Sorted Data with neighborsArr
+expandToNeighbors()
 
 int main(int argc, char *argv[])
 {
@@ -71,7 +72,7 @@ int main(int argc, char *argv[])
   sscanf(argv[4],"%d",&minPts);
   strcpy(inputFname,argv[4]);
 
-  checkParams(N, DIM);
+  checkParams(N, DIM, minPts);
 
   printf("\nAllocating the following amount of memory for the dataset: %f GiB", (sizeof(float)*N*DIM)/(1024*1024*1024.0));
   printf("\nAllocating the following amount of memory for the distance matrix: %f GiB", (sizeof(float)*N*N)/(1024*1024*1024.0));
@@ -88,14 +89,23 @@ int main(int argc, char *argv[])
 
   double tstart=omp_get_wtime();
 
+  if (
   //Allocate memory for the dataset
   float * dev_dataset;
   gpuErrchk(cudaMalloc((float**)&dev_dataset, sizeof(float)*N*DIM));
   gpuErrchk(cudaMemcpy(dev_dataset, dataset, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
 
-  //For part 1 that computes the distance matrix
-  float * dev_distanceMatrix;
-  gpuErrchk(cudaMalloc((float**)&dev_distanceMatrix, sizeof(float)*N*N));
+  //For baseline that computes the distance matrix
+  if (MODE==1)
+  {
+	float *dev_distanceMatrix;
+	gpuErrchk(cudaMalloc((float**)&dev_distanceMatrix, sizeof(float)*N*N));
+  }
+  else
+  {
+  	float *dev_distanceMatrix;
+	gpuErrchk(cudaMalloc((float**)&dev_distanceMatrix, sizeof(float)*N*N));
+  }
   
 
   //Result set shows each elements cluster ID
