@@ -35,17 +35,9 @@ void importDataset(char * fname, unsigned int N, unsigned int DIM, float * datas
 void sortDataset(float *dataset);     //for MODE 2 optimization 
 void outputResultToFile(int * resultSet, unsigned int N, double runTime)
 
-//Part 1: Getting distance matrix/neighbors array
-//Baseline kernel --- 
-
-//Sorted Data with neighborsArr
 getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDim, int *neighborFreqs, int *neighborsArr, int *neighborPos)
 
-//Part 2: expanding cluster ID to neighbors
-//Baseline kernel --- 
-
-//Sorted Data with neighborsArr
-expandToNeighbors()
+void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int numPoints, int minPts, int* clusterLabels)
 
 int main(int argc, char *argv[])
 {
