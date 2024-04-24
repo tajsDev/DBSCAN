@@ -140,6 +140,7 @@ int main(int argc, char *argv[])
   printf("\n\n");
   return 0;
 }
+
 //Import dataset as one 1-D array with N*DIM elements
 //N can be made smaller for testing purposes
 //DIM must be equal to the data dimensionality of the input dataset
@@ -178,6 +179,7 @@ void importDataset(char * fname, unsigned int N, unsigned int DIM, float * datas
     }
     fclose(fp);
 }
+
 void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
   if(N<=0 || DIM<=0){
     fprintf(stderr, "\n Invalid parameters: Error, N: %u, DIM: %u", N, DIM);
@@ -192,11 +194,13 @@ void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
     exit(0); 
   }
 }
+
 void warmUpGPU(){
 printf("\nWarming up GPU for time trialing...\n");
 cudaDeviceSynchronize();
 return;
 }
+
 /*
 sortedD: Dataset sorted along a certain axis
 sortedDim: single int that represents which axis is sorted
@@ -316,4 +320,31 @@ getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDi
 	    neighborsArr[ i ] = localNeighbors[j];
 	}
 	
+}
+
+// CPU function for expand clusters using disjoint set
+void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int numPoints, int minPts, int* clusterLabels)
+{
+    // Create a disjoint set data structure
+    DisjointSet ds(numPoints);
+
+    // Iterate through each point
+    for (int i = 0; i < numPoints; i++) {
+        if (neighborFreqs[i] >= minPts) {
+            // Point forms a cluster
+            int startPos = neighborPos[i];
+            int endPos = startPos + neighborFreqs[i];
+
+            // Merge the sets containing the point and its neighbors
+            for (int j = startPos; j < endPos; j++) {
+                int neighbor = neighborsArr[j];
+                ds.unionSets(i, neighbor);
+            }
+        }
+    }
+
+    // Assign cluster labels based on the disjoint set
+    for (int i = 0; i < numPoints; i++) {
+        clusterLabels[i] = ds.findSet(i);
+    }
 }
