@@ -206,7 +206,7 @@ void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
     fprintf(stderr, "\nReturning");
     exit(0); 
   }
-  float maxMinPts = ceil((float)N * 0.05);
+  float maxMinPts = ceil((float)N * F);
   if(minPts >= maxMinPts)
   {
     fprintf(stderr, "\n For more accurate clustering, please input a MinPts value smaller than %f", maxMinPts);
