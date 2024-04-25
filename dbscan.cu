@@ -1,4 +1,4 @@
-//example of running the program: ./DBSCAN 7490 135000 10000.0 250 bee_dataset_1D_feature_vectors.txt
+//example of running the program: ./DBSCAN 7490 135000 10000.0 5 bee_dataset_1D_feature_vectors.txt
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -7,10 +7,10 @@
 #include <iostream>
 #include <complex.h>
 #include <math.h>
+#include "disjoint_set.h"
 
 //factor (the max percent of dataset that can be neighbors) 
 //      No point be neighbors with more than 5% of the dataset
-#define F 0.05  
 //Error checking GPU calls
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -23,21 +23,25 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
    }
 }
 //Mode 1 is the baseline kernel
-#define MODE 1
+#define MODE 2
 //Define any constants here
 //Feel free to change BLOCKSIZE
 #define BLOCKSIZE 128
+#define SORTED_DIM 0
+#define MAX_NEIGHBORS 100
 using namespace std;
 //function prototypes
 void warmUpGPU();
+void computeDistanceMatrixCPU(float* dataset, unsigned int N, unsigned int DIM);
 void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts);
 void importDataset(char * fname, unsigned int N, unsigned int DIM, float * dataset);
+void printDataset(unsigned int N, unsigned int DIM, float * dataset);
 void sortDataset(float *dataset);     //for MODE 2 optimization 
-void outputResultToFile(int * resultSet, unsigned int N, double runTime)
+void outputResultToFile(int * resultSet, unsigned int N, double runTime);
+void expandClusters(unsigned int N, int* neighborFreqs, int* neighborsArr, int* neighborPos, int minPts, int* clusterLabels);
 
-getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDim, int *neighborFreqs, int *neighborsArr, int *neighborPos)
-
-void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int numPoints, int minPts, int* clusterLabels)
+//kernel prototypes
+__global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos);
 
 int main(int argc, char *argv[])
 {
@@ -48,7 +52,7 @@ int main(int argc, char *argv[])
   unsigned int DIM=0;
   float epsilon=0;
   int minPts=0;
-  if (argc != 5) {
+  if (argc != 6) {
     fprintf(stderr,"Please provide the following on the command line: \nN (number of lines in the file),\ndimensionality (number of coordinates per point), \nepsilon, \nMinPts (The number of points that defines a core point) --larger minpts = more noise = more clusters--\ndataset filename.\n");
     exit(0);
   }
@@ -56,52 +60,40 @@ int main(int argc, char *argv[])
   sscanf(argv[2],"%d",&DIM);
   sscanf(argv[3],"%f",&epsilon);
   sscanf(argv[4],"%d",&minPts);
-  strcpy(inputFname,argv[4]);
+  strcpy(inputFname,argv[5]);
 
   checkParams(N, DIM, minPts);
 
   printf("\nAllocating the following amount of memory for the dataset: %f GiB", (sizeof(float)*N*DIM)/(1024*1024*1024.0));
   
-  float * dataset=(float*)malloc(sizeof(float*)*N*DIM);
-  importDataset(inputFname, N, DIM, dataset);
+  //float * dataset=(float*)malloc(sizeof(float*)*N*DIM);
+  //importDataset(inputFname, N, DIM, dataset);
 
   double tstart=omp_get_wtime();
 
-  //For baseline that computes the distance matrix
-  if (MODE==1)
-  {
-      //Allocate memory for the dataset
-      float * dev_dataset;
-      gpuErrchk(cudaMalloc((float**)&dev_dataset, sizeof(float)*N*DIM));
-      gpuErrchk(cudaMemcpy(dev_dataset, dataset, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
+  //create, populate, allocate, and copy sortedData
+  float *sortedD=(float*)malloc(sizeof(float*)*N*DIM);
+  importDataset(inputFname, N, DIM, sortedD);
 
-      float *dev_distanceMatrix;
-      gpuErrchk(cudaMalloc((float**)&dev_distanceMatrix, sizeof(float)*N*N));
-  }
-  else //if (MODE==2)
-  {
-      //create, populate, allocate, and copy sortedData
-      float *sortedD=(float*)malloc(sizeof(float*)*N*DIM);
-      sortedD = sortDataset(dataset);
-      float *dev_sortedD;
-      gpuErrchk(cudaMalloc((float**)&dev_sortedD, sizeof(float)*N*DIM));
-      gpuErrchk(cudaMemcpy(dev_sortedD, sortedD, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
+  //sortedD = sortDataset(dataset);
+  float *dev_sortedD;
+  gpuErrchk(cudaMalloc((float**)&dev_sortedD, sizeof(float)*N*DIM));
+  gpuErrchk(cudaMemcpy(dev_sortedD, sortedD, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
 
-      //create & allocate neighbors array
-      float *neighborsArr=(float*)malloc(sizeof(float*)*N*N*F);
-      float *dev_neighborsArr;
-      gpuErrchk(cudaMalloc((float**)&dev_neighborsArr, sizeof(float)*N*N*F));
+  //create & allocate neighbors array
+  int *neighborsArr=(int*)malloc(sizeof(int*)*N*MAX_NEIGHBORS);
+  int *dev_neighborsArr;
+  gpuErrchk(cudaMalloc((int**)&dev_neighborsArr, sizeof(int)*N*MAX_NEIGHBORS));
 
-      //create & allocate neighbor frequency array
-      float *neighborFreqs=(float*)malloc(sizeof(float*)*N);
-      float *dev_neighborFreqs;
-      gpuErrchk(cudaMalloc((float**)&dev_neighborFreqs, sizeof(float)*N));
+  //create & allocate neighbor frequency array
+  int *neighborFreqs=(int*)malloc(sizeof(int*)*N);
+  int *dev_neighborFreqs;
+  gpuErrchk(cudaMalloc((int**)&dev_neighborFreqs, sizeof(int)*N));
 
-     //create & allocate neighbor position array
-      float *neighborPos=(float*)malloc(sizeof(float*)*N);
-      float *dev_neighborPos;
-      gpuErrchk(cudaMalloc((float**)&dev_neighborPos, sizeof(float)*N));
-  }
+ //create & allocate neighbor position array
+  int *neighborPos=(int*)malloc(sizeof(int*)*N);
+  int *dev_neighborPos;
+  gpuErrchk(cudaMalloc((int**)&dev_neighborPos, sizeof(int)*N));
 
 
   //Result set shows each elements cluster ID
@@ -112,45 +104,46 @@ int main(int argc, char *argv[])
   unsigned int * dev_resultSet;
   gpuErrchk(cudaMalloc((unsigned int**)&dev_resultSet, sizeof(unsigned int)*N));
   gpuErrchk(cudaMemcpy(dev_resultSet, resultSet, sizeof(unsigned int)*N, cudaMemcpyHostToDevice));
-  
+
+  int *clusterLabels = (int *)malloc(sizeof(int *)*N);
+/*
   //Baseline kernels
   if(MODE==1){
   unsigned int BLOCKDIM = BLOCKSIZE; 
   unsigned int NBLOCKS = ceil(N*1.0/BLOCKDIM);
 
   }
-
-  if(MODE==2){
+*/
+  //if(MODE==2){
   unsigned int BLOCKDIM = BLOCKSIZE; 
   unsigned int NBLOCKS = ceil(N*1.0/BLOCKDIM);
 
   //Part 1: get neighbors array
-  getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, eps, DIM, minPts, sortedDim, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
+  getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, epsilon, N, DIM, minPts, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
 
   //copy neighbors arrays to CPU for expand function
-  gpuErrchk(cudaMemcpy(neighborsArr, dev_neighborsArr, sizeof(unsigned int)*N*N*F, cudaMemcpyDeviceToHost));
+  gpuErrchk(cudaMemcpy(neighborsArr, dev_neighborsArr, sizeof(unsigned int)*N*MAX_NEIGHBORS, cudaMemcpyDeviceToHost));
   gpuErrchk(cudaMemcpy(neighborFreqs, dev_neighborFreqs, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
   gpuErrchk(cudaMemcpy(neighborPos, dev_neighborPos, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
 
   //Part 2: assign clusters
   //create a clusterID array
-  int *clusterLabels = (int *)malloc(sizeof(int *)*N);
-  expandClusters( neighborFreqs, neighborsArr, neighborPos, N, minPts, clusterLabels);
-  }
+  expandClusters( N, neighborFreqs, neighborsArr, neighborPos, minPts, clusterLabels);
+
+  //}
   
   double tend=omp_get_wtime(); 
   double runTime = tend - tstart;
   
-  printf("Writing result to file...\n");
   outputResultToFile( clusterLabels, N, runTime);
-
+  printf("\nResult written to 'result_set.txt'\n");
  
   //Free memory here
   free(neighborsArr);
   free(neighborFreqs);
   free(neighborPos);
   free(clusterLabels);
-  free(dataset);
+  //free(dataset);
   
   if (MODE != 1)
   {
@@ -200,17 +193,31 @@ void importDataset(char * fname, unsigned int N, unsigned int DIM, float * datas
     fclose(fp);
 }
 
+void printDataset(unsigned int N, unsigned int DIM, float * dataset)
+{
+    for (int i=0; i<N; i++){
+        for (int j=0; j<DIM; j++){
+		    if(j!=(DIM-1)){
+			    printf("%.0f,", dataset[i*DIM+j]);
+			}
+			else {
+			  printf("%.0f\n", dataset[i*DIM+j]);
+			}
+		}
+		
+    }  
+}
+
 void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
   if(N<=0 || DIM<=0){
     fprintf(stderr, "\n Invalid parameters: Error, N: %u, DIM: %u", N, DIM);
     fprintf(stderr, "\nReturning");
     exit(0); 
   }
-  float maxMinPts = ceil((float)N * 0.05);
-  if(minPts >= maxMinPts)
+  if(minPts >= MAX_NEIGHBORS)
   {
-    fprintf(stderr, "\n For more accurate clustering, please input a MinPts value smaller than %f", maxMinPts);
-    fprintf(stderr, "\nReturning");
+    fprintf(stderr, "\n For more accurate clustering, please input a MinPts value smaller than %d", MAX_NEIGHBORS);
+    fprintf(stderr, "\nReturning\n");
     exit(0); 
   }
 }
@@ -220,7 +227,7 @@ void outputResultToFile(int * resultSet, unsigned int N, double runTime){
     FILE * fp = fopen( "result_set.txt", "w" ); 
 	
 	fprintf(fp, "\n[MODE: %d, N: %d] Total time: %f", MODE, N, runTime);
-    fprintf(fp, "pointID -> clusterID\n\n"
+    fprintf(fp, "pointID -> clusterID\n\n");
 
     for (int i=0; i<N; i++)
 	{
@@ -231,14 +238,33 @@ void outputResultToFile(int * resultSet, unsigned int N, double runTime){
 }
 
 void warmUpGPU(){
-printf("\nWarming up GPU for time trialing...\n");
-cudaDeviceSynchronize();
-return;
+  printf("\nWarming up GPU for time trialing...\n");
+  cudaDeviceSynchronize();
+  return;
 }
+
+
+void computeDistanceMatrixCPU(float * dataset, unsigned int N, unsigned int DIM)
+{
+    /* float * distanceMatrix = (float*)malloc(sizeof(float)*N*N); */
+	/* double tstart = omp_get_wtime(); */
+
+	/* //Write code here */
+
+	/* double tend = omp_get_wtime(); */
+
+	/* computeSumOfDistances(distanceMatrix, N); */
+
+	/* printf("\nTime to compute distance matrix on the CPU: %f", tend - tstart); */
+
+	/* free(distanceMatrix); */
+}
+
+
 
 /*
 sortedD: Dataset sorted along a certain axis
-sortedDim: single int that represents which axis is sorted
+SORTED_DIM: single int that represents which axis is sorted
    - This should be the axis with the biggest range in values
 eps: search radius distance
 MinPts: minimum number of points in eps to define as part of cluster
@@ -266,10 +292,10 @@ EX - [0,2,3,6,10]
 	  point 2 starts at Index 2 of neighborsArr
 	  point 3 starts at index 3 of neighborsArr ....
 */
-getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDim, int *neighborFreqs, int *neighborsArr, int *neighborPos) //called with thread per element of dataset (N threads)
+__global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos) //called with thread per element of dataset (N threads)
 {
 	//assign thread ID 0,1,2,3....N
-	tid = threadIdx.x + blockIdx.x * blockDim.x;
+	unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	
 	//only keep N threads 
 	if (tid >= N)
@@ -280,19 +306,20 @@ getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDi
 	unsigned int numNeighbors=0;
 	float oneDimDistance = 0;
 	float fullDistance;
-	unsigned int localNeighbors[N*F];
+	unsigned int localNeighbors[ MAX_NEIGHBORS ];
 	unsigned int startIndex = 0;
+	float currSumOfDiff = 0;
 	
 	/////////////////////// OBTAINING LOCAL NEIGHBORS  /////////////////////////////
 	
 	//loop up from threadID element + 1 until difference in sorted dimension values > epsilon
-	for (int pointIndex=tid+1; oneDimDistance < eps && pointIndex < N; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
+	for (int pointIndex=tid+1; oneDimDistance < eps && pointIndex < N && numNeighbors < MAX_NEIGHBORS; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
 	{
 		float currSumOfDiff = 0;
 		
 		//this line breaks the loop
-		//basically if the difference in the sortedDim of 2 points > eps, no more comparisons needed
-		oneDimDistance = sortedD[ tid*DIM+sortedDim ] - sortedD[ pointIndex*DIM+sortedDim ];
+		//basically if the difference in the SORTED_DIM of 2 points > eps, no more comparisons needed
+		oneDimDistance = sortedD[ tid*DIM+SORTED_DIM ] - sortedD[ pointIndex*DIM+SORTED_DIM ];
 		
 		//loop through dimensions of points 
 		for (int dimIndex = 0; dimIndex < DIM; dimIndex++)
@@ -311,11 +338,11 @@ getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDi
 	}
 			
 	//loop down from threadID element - 1 until difference in x values > epsilon
-	for (int pointIndex=tid-1; oneDimDistance < eps; pointIndex--)
+	for (int pointIndex=tid-1; oneDimDistance < eps && pointIndex >= 0 && numNeighbors < MAX_NEIGHBORS; pointIndex--)
 	{
 		//this line breaks the loop
-		//basically if the difference in the sortedDim of 2 points > eps, no more comparisons needed
-		oneDimDistance = sortedD[ tid*DIM+sortedDim ] - sortedD[ pointIndex*DIM+sortedDim ];
+		//basically if the difference in the SORTED_DIM of 2 points > eps, no more comparisons needed
+		oneDimDistance = sortedD[ tid*DIM+SORTED_DIM ] - sortedD[ pointIndex*DIM+SORTED_DIM ];
 		
 		//loop through dimensions of points 
 		for (int dimIndex = 0; dimIndex < DIM; dimIndex++)
@@ -335,7 +362,7 @@ getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDi
 	////////////////// POPULATE NEIGHBOR FREQUENCY ARRAY ///////////////////////
 	
 	//give neighborFreq number of neighbors 
-    neighborFreq[tid] = numNeighbors;
+    neighborFreqs[tid] = numNeighbors;
 	
 	__syncthreads();
 	
@@ -344,26 +371,29 @@ getNeighborsSorted(float *sortedD, float eps, int DIM, int min_pts, int sortedDi
 	//find starting position
 	for (int i = 0; i < tid; i++)
 	{
-		startIndex += neighborFreq[i];             //confirm this works
+		startIndex += neighborFreqs[i];             //confirm this works
 	}
 	
 	neighborPos[ tid ] = startIndex;
 	
 	//transfer from registers to global 
-	for (int i = startIndex, int j=0; i < startIndex + numNeighbors; i++, j++)
+
+	int j = 0;
+	for (int i = startIndex; i < startIndex + numNeighbors; i++)
 	{
 	    neighborsArr[ i ] = localNeighbors[j];
+		j++;
 	}
 }
 
 // CPU function for expand clusters using disjoint set
-void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int numPoints, int minPts, int* clusterLabels)
+void expandClusters(unsigned int N, int* neighborFreqs, int* neighborsArr, int* neighborPos, int minPts, int* clusterLabels)
 {
     // Create a disjoint set data structure
-    DisjointSet ds(numPoints);
+    DisjointSet ds(N);
 
     // Iterate through each point
-    for (int i = 0; i < numPoints; i++) {
+    for (int i = 0; i < N; i++) {
         if (neighborFreqs[i] >= minPts) {
             // Point forms a cluster
             int startPos = neighborPos[i];
@@ -378,127 +408,7 @@ void expandClusters(int* neighborFreqs, int* neighborsArr, int* neighborPos, int
     }
 
     // Assign cluster labels based on the disjoint set
-    for (int i = 0; i < numPoints; i++) {
+    for (int i = 0; i < N; i++) {
         clusterLabels[i] = ds.findSet(i);
     }
-}
-
-int runPartition(float *dataset, int lowIndex, int highIndex )
-{
-	//declare variables:
-	int workIndex, pivIndex, partValue;
-	// Identify the partition value at the beginning
-    // of the array segment (at lowIndex)
-	partValue = dataset[lowIndex];
-	
-    // set the working index and the pivot index
-    // to the low index parameter
-	pivIndex = lowIndex;
-	
-    // Start a loop across the the array segment
-    // from the low index to the high index, inclusive
-    // This will use the working index
-	for(workIndex = lowIndex+1; workIndex < highIndex; workIndex++)
-	{
-        // check if the value at the current working index
-        // is less than the original pivot value
-		if(dataset[workIndex] < partValue)
-		{
-            // increment the pivot index
-			pivIndex++;
-            // swap the value at the working index
-            // with the value at the pivot index
-			swapElements(dataset, workIndex, pivIndex);
-		}
-	}
-    // end working loop 
-
-    // Swap the original pivot value (at the low index)
-    // with the value at the current pivot index
-	//function swapElements
-	swapElements(dataset,pivIndex,lowIndex);
-	
-    // return the pivot index
-	return pivIndex;
-	
-}
-
-void runQuickSort( float * dataset, int size)
-{
-	//get low index
-	int lowIndex = 0 ;
-	//get high index
-	int highIndex = size ;
-	
-	//call runQuickSortHelper
-	runQuickSortHelper(dataset, lowIndex, highIndex);
-}
-
-void runQuickSortHelper( float * dataset,  int lowIndex, int highIndex )
-{
-	//declare pivot index
-	int pivIndex;
-	
-	//first make sure loindex of list is less than upper
-	if(lowIndex < highIndex)
-	{
-		//call partiiton processto set pibot val and get its index
-		pivIndex = runPartition(dataset, lowIndex, highIndex);
-		
-		//call quick sort process for left side of list
-		//to the left of hte pivot indedx
-		runQuickSortHelper(dataset,lowIndex,pivIndex);
-		
-		//call quick sort process for right side of list
-		//to the right of the pivot index
-		runQuickSortHelper(dataset,pivIndex+1,highIndex);
-	}
-		
-	
-}
-
-void CPUdbscan(float * clusters) {
-  int i, j, cluster = 0;
-  for (i = 0; i < DATASET_SIZE; i++) {
-    if (clusters[i] != 0) continue;
-    float neighbors[SIZE];
-    int neighbors_size = findNeighbors(i, neighbors);
-
-    if (neighbors_size < minPoints) {
-      clusters[i] = -1;
-      continue;
-    }
-    cluster++;
-    clusters[i] = cluster;
-
-    for (j = 0; j < neighbors_size; j++) {
-      int dataIndex = neighbors[j];
-
-      if (dataIndex == i) continue;
-
-      if (clusters[dataIndex] == -1) {
-        clusters[dataIndex] = cluster;
-        continue;
-      }
-      if (clusters[dataIndex] != 0) continue;
-
-      clusters[dataIndex] = cluster;
-
-      float moreNeighbors[SIZE];
-      int moreNeighbors_size = findNeighbors(dataIndex, moreNeighbors);
-
-      if (moreNeighbors_size >= minPoints) {
-        int x;
-        for (x = 0; x < moreNeighbors_size; x++) {
-          neighbors[neighbors_size++] = moreNeighbors[x];
-        }
-      }
-    }
-  }
-}
-
-int findNeighbors(int index,float * neighbors) {
-int size = 0;
-
-  return size;
 }
