@@ -11,6 +11,7 @@
 
 //factor (the max percent of dataset that can be neighbors) 
 //      No point be neighbors with more than 5% of the dataset
+
 //Error checking GPU calls
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -27,8 +28,10 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 //Define any constants here
 //Feel free to change BLOCKSIZE
 #define BLOCKSIZE 128
+
 #define SORTED_DIM 0
 #define MAX_NEIGHBORS 100
+
 using namespace std;
 //function prototypes
 void warmUpGPU();
@@ -38,6 +41,7 @@ void importDataset(char * fname, unsigned int N, unsigned int DIM, float * datas
 void printDataset(unsigned int N, unsigned int DIM, float * dataset);
 void sortDataset(float *dataset);     //for MODE 2 optimization 
 void outputResultToFile(int * resultSet, unsigned int N, double runTime);
+
 void expandClusters(unsigned int N, int* neighborFreqs, int* neighborsArr, int* neighborPos, int minPts, int* clusterLabels);
 void outputNeighbors( int *neighborsArr, int *neighborPos, unsigned int N );
 void outputNeighborPos( int *neighborPos, unsigned int N );
@@ -46,6 +50,7 @@ void outputNeighborFreqs( int *neighborFreqs, unsigned int N );
 //kernel prototypes
 __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos);
 __global__ void partTwo(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos);
+
 
 int main(int argc, char *argv[])
 {
@@ -75,16 +80,19 @@ int main(int argc, char *argv[])
 
   double tstart=omp_get_wtime();
 
+
   //create, populate, allocate, and copy sortedData
   float *sortedD=(float*)malloc(sizeof(float*)*N*DIM);
   importDataset(inputFname, N, DIM, sortedD);
 
   //sortedD = sortDataset(dataset);
+
   float *dev_sortedD;
   gpuErrchk(cudaMalloc((float**)&dev_sortedD, sizeof(float)*N*DIM));
   gpuErrchk(cudaMemcpy(dev_sortedD, sortedD, sizeof(float)*N*DIM, cudaMemcpyHostToDevice));
 
   //create & allocate neighbors array
+
   int *neighborsArr=(int*)malloc(sizeof(int*)*N*MAX_NEIGHBORS);
   int *dev_neighborsArr;
   gpuErrchk(cudaMalloc((int**)&dev_neighborsArr, sizeof(int)*N*MAX_NEIGHBORS));
@@ -110,6 +118,7 @@ int main(int argc, char *argv[])
   gpuErrchk(cudaMemcpy(dev_resultSet, resultSet, sizeof(unsigned int)*N, cudaMemcpyHostToDevice));
 
   int *clusterLabels = (int *)malloc(sizeof(int *)*N);
+
 /*
   //Baseline kernels
   if(MODE==1){
@@ -126,6 +135,7 @@ int main(int argc, char *argv[])
   getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, epsilon, N, DIM, minPts, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
   partTwo<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, epsilon, N, DIM, minPts, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
 
+
   //copy neighbors arrays to CPU for expand function
   gpuErrchk(cudaMemcpy(neighborsArr, dev_neighborsArr, sizeof(unsigned int)*N*MAX_NEIGHBORS, cudaMemcpyDeviceToHost));
   gpuErrchk(cudaMemcpy(neighborFreqs, dev_neighborFreqs, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
@@ -137,6 +147,7 @@ outputNeighbors( neighborsArr, neighborPos, N );
 
   //Part 2: assign clusters
   //create a clusterID array
+
   expandClusters( N, neighborFreqs, neighborsArr, neighborPos, minPts, clusterLabels);
 
   //}
@@ -201,6 +212,7 @@ void importDataset(char * fname, unsigned int N, unsigned int DIM, float * datas
     }
     fclose(fp);
 }
+
 
 void outputNeighbors( int *neighborsArr, int *neighborPos, unsigned int N )
 {
@@ -277,7 +289,9 @@ void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
     fprintf(stderr, "\nReturning");
     exit(0); 
   }
+
   if(minPts >= MAX_NEIGHBORS)
+
   {
     fprintf(stderr, "\n For more accurate clustering, please input a MinPts value smaller than %d", MAX_NEIGHBORS);
     fprintf(stderr, "\nReturning\n");
@@ -324,7 +338,6 @@ void computeDistanceMatrixCPU(float * dataset, unsigned int N, unsigned int DIM)
 }
 
 
-
 /*
 sortedD: Dataset sorted along a certain axis
 SORTED_DIM: single int that represents which axis is sorted
@@ -369,6 +382,7 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 	unsigned int numNeighbors=0;
 	float oneDimDistance = 0;
 	float fullDistance;
+
 	float currSumOfDiff = 0;
 	
 	/////////////////////// OBTAINING LOCAL NEIGHBORS  /////////////////////////////
@@ -419,7 +433,8 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 	////////////////// POPULATE NEIGHBOR FREQUENCY ARRAY ///////////////////////
 	
 	//give neighborFreq number of neighbors 
-        neighborFreqs[tid] = numNeighbors;
+  neighborFreqs[tid] = numNeighbors;
+
 	
 }
 	
@@ -512,7 +527,9 @@ __global__ void partTwo(float *sortedD, float eps, unsigned int N, int DIM, int 
 }
 
 // CPU function for expand clusters using disjoint set
+
 void expandClusters(unsigned int N, int* neighborFreqs, int* neighborsArr, int* neighborPos, int minPts, int* clusterLabels)
+
 {
     // Create a disjoint set data structure
     DisjointSet ds(N);

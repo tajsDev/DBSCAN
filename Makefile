@@ -4,6 +4,7 @@
 #Compute capability: K80: 37, P100: 60, V100: 70, A100: 80
 #Example compilation for A100
 
+
 CC=70
 
 all: baseline
