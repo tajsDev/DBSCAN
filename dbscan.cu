@@ -174,55 +174,37 @@ int main(int argc, char *argv[])
 //Import dataset as one 1-D array with N*DIM elements
 //N can be made smaller for testing purposes
 //DIM must be equal to the data dimensionality of the input dataset
-void importDataset(char * fname, unsigned int N, unsigned int DIM, float * dataset){
-    
+void importDataset(char *fname, unsigned int N, unsigned int DIM, float* dataset){
     FILE *fp = fopen(fname, "r");
     if (!fp) {
         fprintf(stderr, "Unable to open file\n");
         fprintf(stderr, "Error: dataset was not imported. Returning.");
         exit(0);
     }
-    unsigned int bufferSize = DIM*10; 
-    char buf[bufferSize];
-    unsigned int rowCnt = 0;
-    unsigned int colCnt = 0;
-    while (fgets(buf, bufferSize, fp) && rowCnt<N) {
-        colCnt = 0;
-        char *field = strtok(buf, ",");
-        double tmp;
-        sscanf(field,"%lf",&tmp);
-        
-        dataset[rowCnt*DIM+colCnt]=tmp;
-        
-        while (field) {
-          colCnt++;
-          field = strtok(NULL, ",");
-          
-          if (field!=NULL)
-          {
-          double tmp;
-          sscanf(field,"%lf",&tmp);
-          dataset[rowCnt*DIM+colCnt]=tmp;
-          }   
-        }
-        rowCnt++;
-    }
-    fclose(fp);
-}
 
-void printDataset(unsigned int N, unsigned int DIM, float * dataset)
-{
-    for (int i=0; i<N; i++){
-        for (int j=0; j<DIM; j++){
-		    if(j!=(DIM-1)){
-			    printf("%.0f,", dataset[i*DIM+j]);
-			}
-			else {
-			  printf("%.0f\n", dataset[i*DIM+j]);
-			}
-		}
-		
-    }  
+    char line[256];
+
+    // Skip the first row containing headers
+    fgets(line, sizeof(line), fp);
+
+    unsigned int idx = 0;
+    while (fgets(line, sizeof(line), fp) && idx < N*DIM) {
+        char *token = strtok(line, ",");
+        double value;
+
+        while (token != NULL && idx < N*DIM) {
+            sscanf(token, "%lf", &value);
+            dataset[idx++] = value;
+            token = strtok(NULL, ",");
+        }
+    }
+
+    fclose(fp);
+
+    // Print the imported dataset
+    for (unsigned int i = 0; i < N*DIM; i += 2) {
+        printf("point[%u]: %f, %f\n", i/2, dataset[i], dataset[i+1]);
+    }
 }
 
 void checkParams(unsigned int N, unsigned int DIM, unsigned int minPts){
