@@ -1,4 +1,4 @@
-//example of running the program: ./DBSCAN 7490 135000 10000.0 5 bee_dataset_1D_feature_vectors.txt
+//example of running the program: ./DBSCAN 7490 135000 10000.0 250 bee_dataset_1D_feature_vectors.txt
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -39,9 +39,13 @@ void printDataset(unsigned int N, unsigned int DIM, float * dataset);
 void sortDataset(float *dataset);     //for MODE 2 optimization 
 void outputResultToFile(int * resultSet, unsigned int N, double runTime);
 void expandClusters(unsigned int N, int* neighborFreqs, int* neighborsArr, int* neighborPos, int minPts, int* clusterLabels);
+void outputNeighbors( int *neighborsArr, int *neighborPos, unsigned int N );
+void outputNeighborPos( int *neighborPos, unsigned int N );
+void outputNeighborFreqs( int *neighborFreqs, unsigned int N );
 
 //kernel prototypes
 __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos);
+__global__ void partTwo(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos);
 
 int main(int argc, char *argv[])
 {
@@ -120,11 +124,16 @@ int main(int argc, char *argv[])
 
   //Part 1: get neighbors array
   getNeighborsSorted<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, epsilon, N, DIM, minPts, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
+  partTwo<<<NBLOCKS, BLOCKDIM>>>( dev_sortedD, epsilon, N, DIM, minPts, dev_neighborFreqs, dev_neighborsArr, dev_neighborPos);
 
   //copy neighbors arrays to CPU for expand function
   gpuErrchk(cudaMemcpy(neighborsArr, dev_neighborsArr, sizeof(unsigned int)*N*MAX_NEIGHBORS, cudaMemcpyDeviceToHost));
   gpuErrchk(cudaMemcpy(neighborFreqs, dev_neighborFreqs, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
   gpuErrchk(cudaMemcpy(neighborPos, dev_neighborPos, sizeof(unsigned int)*N, cudaMemcpyDeviceToHost));
+
+outputNeighborPos( neighborPos, N );
+outputNeighborFreqs( neighborFreqs, N );
+outputNeighbors( neighborsArr, neighborPos, N );
 
   //Part 2: assign clusters
   //create a clusterID array
@@ -150,7 +159,7 @@ int main(int argc, char *argv[])
       free(sortedD);
   }
   
-  printf("\n\nMain complete");
+  printf("\n\nMain complete\n");
   return 0;
 }
 
@@ -192,6 +201,60 @@ void importDataset(char * fname, unsigned int N, unsigned int DIM, float * datas
     }
     fclose(fp);
 }
+
+void outputNeighbors( int *neighborsArr, int *neighborPos, unsigned int N )
+{
+    // Open file for writing
+    FILE * fp = fopen( "neighbors.txt", "w" );
+	
+    fprintf(fp, "pointID -> neighbors\n");
+
+    for (int i=0; i<N; i++)
+    {
+        fprintf(fp, "\n%d -> ", i);
+
+        for (int j=neighborPos[i]; j<neighborPos[i+1]; j++)
+        {
+             fprintf(fp, "%d, ", neighborsArr[j]);
+        }
+    }   
+
+    fclose(fp);
+
+}
+
+void outputNeighborPos( int *neighborPos, unsigned int N )
+{
+    // Open file for writing
+    FILE * fp = fopen( "neighborPos.txt", "w" );
+	
+    fprintf(fp, "pointID -> pos in neighbor array\n");
+
+    for (int i=0; i<N; i++)
+    { 
+        fprintf(fp, "%d -> %d\n", i, neighborPos[i]);
+    }   
+
+    fclose(fp);
+
+}
+
+void outputNeighborFreqs( int *neighborFreqs, unsigned int N )
+{
+    // Open file for writing
+    FILE * fp = fopen( "neighborFreqs.txt", "w" );
+	
+    fprintf(fp, "pointID -> # neighbors\n");
+
+    for (int i=0; i<N; i++)
+    { 
+        fprintf(fp, "%d -> %d\n", i, neighborFreqs[i]);
+    }   
+
+    fclose(fp);
+
+}
+
 
 void printDataset(unsigned int N, unsigned int DIM, float * dataset)
 {
@@ -306,14 +369,82 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 	unsigned int numNeighbors=0;
 	float oneDimDistance = 0;
 	float fullDistance;
-	unsigned int localNeighbors[ MAX_NEIGHBORS ];
+	float currSumOfDiff = 0;
+	
+	/////////////////////// OBTAINING LOCAL NEIGHBORS  /////////////////////////////
+
+	//loop up from threadID element + 1 until difference in sorted dimension values > epsilon
+	for (int pointIndex=tid; oneDimDistance < eps && pointIndex < N && numNeighbors < MAX_NEIGHBORS; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
+	{
+		float currSumOfDiff = 0;
+		
+		//this line breaks the loop
+		//basically if the difference in the SORTED_DIM of 2 points > eps, no more comparisons needed
+		oneDimDistance = sortedD[ tid*DIM+SORTED_DIM ] - sortedD[ pointIndex*DIM+SORTED_DIM ];
+		
+		//loop through dimensions of points 
+		for (int dimIndex = 0; dimIndex < DIM; dimIndex++)
+		{
+			currSumOfDiff += (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]) * 
+							  (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]);
+		}
+		fullDistance = sqrt(currSumOfDiff);
+		
+		if (fullDistance <= eps)
+		{
+			numNeighbors++;
+		}
+	}
+			
+	//loop down from threadID element - 1 until difference in x values > epsilon
+	for (int pointIndex=tid-1; oneDimDistance < eps && pointIndex >= 0 && numNeighbors < MAX_NEIGHBORS; pointIndex--)
+	{
+		//this line breaks the loop
+		//basically if the difference in the SORTED_DIM of 2 points > eps, no more comparisons needed
+		oneDimDistance = sortedD[ tid*DIM+SORTED_DIM ] - sortedD[ pointIndex*DIM+SORTED_DIM ];
+		
+		//loop through dimensions of points 
+		for (int dimIndex = 0; dimIndex < DIM; dimIndex++)
+		{
+			currSumOfDiff += (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]) * 
+							  (sortedD[tid*DIM+dimIndex] - sortedD[pointIndex*DIM+dimIndex]);
+		}
+		fullDistance = sqrt(currSumOfDiff);
+		
+		if (fullDistance <= eps)
+		{
+			numNeighbors++;
+		}
+	}
+	////////////////// POPULATE NEIGHBOR FREQUENCY ARRAY ///////////////////////
+	
+	//give neighborFreq number of neighbors 
+        neighborFreqs[tid] = numNeighbors;
+	
+}
+	
+__global__ void partTwo(float *sortedD, float eps, unsigned int N, int DIM, int min_pts, int *neighborFreqs, int *neighborsArr, int *neighborPos)
+{
+	//assign thread ID 0,1,2,3....N
+	unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	
+	//only keep N threads 
+	if (tid >= N)
+	{
+		return;
+	}
+	
+	unsigned int numNeighbors=0;
+	float oneDimDistance = 0;
+	float fullDistance;
+	unsigned int localNeighbors[ MAX_NEIGHBORS + 1 ];
 	unsigned int startIndex = 0;
 	float currSumOfDiff = 0;
 	
 	/////////////////////// OBTAINING LOCAL NEIGHBORS  /////////////////////////////
-	
+
 	//loop up from threadID element + 1 until difference in sorted dimension values > epsilon
-	for (int pointIndex=tid+1; oneDimDistance < eps && pointIndex < N && numNeighbors < MAX_NEIGHBORS; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
+	for (int pointIndex=tid; oneDimDistance < eps && pointIndex < N && numNeighbors < MAX_NEIGHBORS; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
 	{
 		float currSumOfDiff = 0;
 		
@@ -359,14 +490,8 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 			numNeighbors++;
 		}
 	}
-	////////////////// POPULATE NEIGHBOR FREQUENCY ARRAY ///////////////////////
-	
-	//give neighborFreq number of neighbors 
-    neighborFreqs[tid] = numNeighbors;
-	
-	__syncthreads();
-	
-	//////////////////////// POPULATE NEIGHBORS ARRAY  ////////////////////////
+
+//////////////////////// POPULATE NEIGHBORS ARRAY  ////////////////////////
 	
 	//find starting position
 	for (int i = 0; i < tid; i++)
