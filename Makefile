@@ -4,12 +4,8 @@
 #Compute capability: K80: 37, P100: 60, V100: 70, A100: 80
 #Example compilation for A100
 
-CC=80
-# command line parameters here:
-N=10 # N
-DIM=12 # DIM
-EPS=0.1 # epsilon
-MPTS=10 # minPts
+
+CC=70
 
 all: baseline
 
