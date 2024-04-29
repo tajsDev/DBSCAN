@@ -334,14 +334,15 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 	unsigned int numNeighbors=0;
 	float oneDimDistance = 0;
 	float fullDistance;
-	unsigned int localNeighbors[ MAX_NEIGHBORS ];
+	unsigned int localNeighbors[ MAX_NEIGHBORS + 1 ];
 	unsigned int startIndex = 0;
 	float currSumOfDiff = 0;
+	
 	
 	/////////////////////// OBTAINING LOCAL NEIGHBORS  /////////////////////////////
 	
 	//loop up from threadID element + 1 until difference in sorted dimension values > epsilon
-	for (int pointIndex=tid+1; oneDimDistance < eps && pointIndex < N && numNeighbors < MAX_NEIGHBORS; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
+	for (int pointIndex=tid; oneDimDistance < eps && pointIndex < N && numNeighbors < MAX_NEIGHBORS+1; pointIndex++)            //can optimize by having neighbors >= minpts terminate loop
 	{
 		float currSumOfDiff = 0;
 		
@@ -357,7 +358,7 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 		}
 		fullDistance = sqrt(currSumOfDiff);
 		
-		if (fullDistance <= eps)
+		if (fullDistance <= eps && numNeighbors < MAX_NEIGHBORS + 1)
 		{
 			//neighborArr[tid+neighborIndex] = pointIndex;
 			localNeighbors[numNeighbors] = pointIndex;
@@ -370,7 +371,7 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
     oneDimDistance = 0;
 			
 	//loop down from threadID element - 1 until difference in x values > epsilon
-	for (int pointIndex=tid-1; oneDimDistance < eps && pointIndex >= 0 && numNeighbors < MAX_NEIGHBORS; pointIndex--)
+	for (int pointIndex=tid-1; oneDimDistance < eps && pointIndex >= 0 && numNeighbors < MAX_NEIGHBORS+1; pointIndex--)
 	{
 		//this line breaks the loop
 		//basically if the difference in the SORTED_DIM of 2 points > eps, no more comparisons needed
@@ -384,7 +385,7 @@ __global__ void getNeighborsSorted(float *sortedD, float eps, unsigned int N, in
 		}
 		fullDistance = sqrt(currSumOfDiff);
 		
-		if (fullDistance <= eps)
+		if (fullDistance <= eps && numNeighbors < MAX_NEIGHBORS+1)
 		{
 			//neighborArr[tid+neighborIndex] = pointIndex;
 			localNeighbors[numNeighbors] = pointIndex;
