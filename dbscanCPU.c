@@ -4,77 +4,74 @@
 #include <time.h>
 #include <math.h>
 
-#define DATASET_SIZE 1864620
+#define DATASET_SIZE 1199
 #define DIMENTION 2
-#define ELIPSON 1.25
-#define MIN_POINTS 4
+#define ELIPSON 1.0
+#define MIN_POINTS 5
 
 struct Rect {
     double min[2];
     double max[2];
 };
 
-int searchNeighbors(const void *node, const void *rect,double **dataset) {
+int searchNeighbors(const void *node, const void *rect, float *dataset) {
     int id = *(int *)node;
     struct Rect *r = (struct Rect *)rect;
     // Check if the node is within the rectangle
-    if (dataset[id][0] >= r->min[0] && dataset[id][0] <= r->max[0] &&
-        dataset[id][1] >= r->min[1] && dataset[id][1] <= r->max[1]) {
+    if (dataset[id * DIMENTION + 0] >= r->min[0] && dataset[id * DIMENTION + 0] <= r->max[0] &&
+        dataset[id * DIMENTION + 1] >= r->min[1] && dataset[id * DIMENTION + 1] <= r->max[1]) {
         return 1; // Return 1 to include the node in the search results
     }
     return 0; // Return 0 to exclude the node from the search results
 }
 
 
-double getDistance(int center, int neighbor, double **dataset) {
-    double dist = (dataset[center][0] - dataset[neighbor][0]) *
-                      (dataset[center][0] - dataset[neighbor][0]) +
-                  (dataset[center][1] - dataset[neighbor][1]) *
-                      (dataset[center][1] - dataset[neighbor][1]);
+double getDistance(int center, int neighbor, float *dataset) {
+    double dist = (dataset[center * DIMENTION + 0] - dataset[neighbor * DIMENTION + 0]) *
+                      (dataset[center * DIMENTION + 0] - dataset[neighbor * DIMENTION + 0]) +
+                  (dataset[center * DIMENTION + 1] - dataset[neighbor * DIMENTION + 1]) *
+                      (dataset[center * DIMENTION + 1] - dataset[neighbor * DIMENTION + 1]);
 
     return dist;
 }
 
-void importDataset(char * fname, unsigned int N, unsigned int DIM, float * dataset){
-    
+void importDataset(char *fname, unsigned int N, unsigned int DIM, float* dataset){
     FILE *fp = fopen(fname, "r");
     if (!fp) {
         fprintf(stderr, "Unable to open file\n");
         fprintf(stderr, "Error: dataset was not imported. Returning.");
         exit(0);
     }
-    unsigned int bufferSize = DIM*10; 
-    char buf[bufferSize];
-    unsigned int rowCnt = 0;
-    unsigned int colCnt = 0;
-    while (fgets(buf, bufferSize, fp) && rowCnt<N) {
-        colCnt = 0;
-        char *field = strtok(buf, ",");
-        double tmp;
-        sscanf(field,"%lf",&tmp);
-        
-        dataset[rowCnt*DIM+colCnt]=tmp;
-        
-        while (field) {
-          colCnt++;
-          field = strtok(NULL, ",");
-          
-          if (field!=NULL)
-          {
-          double tmp;
-          sscanf(field,"%lf",&tmp);
-          dataset[rowCnt*DIM+colCnt]=tmp;
-          }   
+
+    char line[256];
+
+    // Skip the first row containing headers
+    fgets(line, sizeof(line), fp);
+
+    unsigned int idx = 0;
+    while (fgets(line, sizeof(line), fp) && idx < N*DIM) {
+        char *token = strtok(line, ",");
+        double value;
+
+        while (token != NULL && idx < N*DIM) {
+            sscanf(token, "%lf", &value);
+            dataset[idx++] = value;
+            token = strtok(NULL, ",");
         }
-        rowCnt++;
     }
+
     fclose(fp);
+
+    // Print the imported dataset
+    for (unsigned int i = 0; i < N*DIM; i += 2) {
+        printf("point[%u]: %f, %f\n", i/2, dataset[i], dataset[i+1]);
+    }
 }
 
-void findNeighbors(int pos,float *dataset, double elipson, int *neighbors, int *numNeighbors) {
+void findNeighbors(int pos, float *dataset, double elipson, int *neighbors, int *numNeighbors) {
     struct Rect searchRect = {
-        {dataset[pos * DIMENTION + index] - elipson, dataset[pos][1] - elipson},
-        {dataset[pos][0] + elipson, dataset[pos][1] + elipson}
+        {dataset[pos * DIMENTION + 0] - elipson, dataset[pos * DIMENTION + 1] - elipson},
+        {dataset[pos * DIMENTION + 0] + elipson, dataset[pos * DIMENTION + 1] + elipson}
     };
 
     *numNeighbors = 0;
@@ -156,8 +153,8 @@ void results(int *clusters) {
 }
 
 int main(int argc, char **argv) {
-    float *dataset = (float *)malloc(sizeof(float) * DATASET_SIZE);
-       importDataset("sorted_smiley.txt", DATASET_SIZE,DIMENTION, dataset);
+    float *dataset = (float *)malloc(sizeof(float) * DATASET_SIZE * DIMENTION);
+    importDataset("sorted_smiley.csv", DATASET_SIZE, DIMENTION, dataset);
 
     clock_t totalTimeStart, totalTimeStop;
     double totalTime = 0.0;
@@ -174,9 +171,15 @@ int main(int argc, char **argv) {
     printf("Total Time: %3.2f seconds\n", totalTime);
     printf("==============================================\n");
 
+    printf("Clusters:\n");
+    for (int i = 0; i < DATASET_SIZE; i++) {
+        printf("%d ", clusters[i]);
+    }
+    printf("\n");
+
     results(clusters);
 
-     free(dataset);
+    free(dataset);
     free(clusters);
 
     return 0;
